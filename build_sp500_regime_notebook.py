@@ -230,6 +230,26 @@ cells = [
             return artifact_path
 
 
+        def save_narrative_cell_artifact(
+            section_tag: str,
+            section_title: str,
+            narrative_markdown: str,
+            llm_guidance: str,
+        ) -> Path:
+            narrative_text = (
+                f"# {section_title}\\n\\n"
+                f"{narrative_markdown.strip()}\\n\\n"
+                "Language requirement: EN-US."
+            )
+            return save_text_artifact(
+                text_content=narrative_text,
+                section_tag=section_tag,
+                short_name=f"{section_title}_narrative_cell",
+                manuscript_role="Narrative manuscript text block exported from notebook prose.",
+                llm_guidance=llm_guidance,
+            )
+
+
         def save_figure_artifact(
             figure_object,
             section_tag: str,
@@ -277,6 +297,35 @@ cells = [
         print("Keras version:", keras.__version__)
         print("Output directory:", output_dir)
 
+        abstract_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec00",
+            section_title="Abstract",
+            narrative_markdown=(
+                "Financial markets are complex, non-stationary systems driven not only by historical "
+                "price action but also by shifting macroeconomic sentiment and policy uncertainty. "
+                "This study proposes a regime-aware deep learning framework that fuses S&P 500 OHLCV "
+                "data with FRED macro-sentiment proxies to improve context-aware prediction and "
+                "financially meaningful evaluation."
+            ),
+            llm_guidance=(
+                "Use this abstract text as the top-level framing. Ensure all manuscript sections remain "
+                "consistent with the multimodal, regime-aware contribution and financial utility metrics."
+            ),
+        )
+        section_1_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec01",
+            section_title="Section 1 - Environment Setup and Reproducibility",
+            narrative_markdown=(
+                "This section defines deterministic controls and forecasting target notation. "
+                "The one-day-ahead target is given by $r_{t+1} = \\log(P_{t+1}/P_t)$."
+            ),
+            llm_guidance=(
+                "Use this text in Methods to justify reproducibility controls and target definition."
+            ),
+        )
+        print(f"Saved narrative: {abstract_narrative_path}")
+        print(f"Saved narrative: {section_1_narrative_path}")
+
         reproducibility_table = pd.DataFrame(
             [
                 {"Item": "Python hash seed", "Value": os.environ["PYTHONHASHSEED"]},
@@ -310,6 +359,19 @@ cells = [
     code_cell(
         """
         # Section 2 code: download market and macro data.
+        section_2_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec02",
+            section_title="Section 2 - Multimodal Data Acquisition",
+            narrative_markdown=(
+                "We assemble two synchronized channels: market dynamics from S&P 500 OHLCV and "
+                "macroeconomic sentiment/uncertainty proxies from FRED, including UMCSENT and EMVMACROBUS."
+            ),
+            llm_guidance=(
+                "Use this narrative in the Data section to describe source provenance and multimodal rationale."
+            ),
+        )
+        print(f"Saved narrative: {section_2_narrative_path}")
+
         market_raw = yf.download(
             config.market_ticker,
             start=config.start_date,
@@ -428,6 +490,19 @@ cells = [
     code_cell(
         """
         # Section 3 code: create market and macro engineered features.
+        section_3_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec03",
+            section_title="Section 3 - Feature Engineering for Market and Macro Signals",
+            narrative_markdown=(
+                "We engineer trend, momentum, and risk factors from market data and create macro transforms "
+                "such as year-over-year inflation and the policy term spread to encode regime context."
+            ),
+            llm_guidance=(
+                "Use this text in Methods when documenting feature construction and economic interpretation."
+            ),
+        )
+        print(f"Saved narrative: {section_3_narrative_path}")
+
         market_df = market_raw.copy()
 
         market_df["log_return_1d"] = np.log(market_df["Adj Close"]).diff()
@@ -537,6 +612,19 @@ cells = [
     code_cell(
         """
         # Section 4 code: align macro data to daily market dates with a conservative lag.
+        section_4_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec04",
+            section_title="Section 4 - Temporal Alignment Without Look-Ahead Bias",
+            narrative_markdown=(
+                "Macro variables are reindexed to trading days using forward fill and shifted by one business day "
+                "to avoid information leakage from same-day releases."
+            ),
+            llm_guidance=(
+                "Use this narrative in Methods to explain causality-preserving temporal alignment."
+            ),
+        )
+        print(f"Saved narrative: {section_4_narrative_path}")
+
         macro_daily = macro_df.reindex(market_df.index).ffill()
         macro_daily_lagged = macro_daily.shift(1)
 
@@ -609,6 +697,19 @@ cells = [
     code_cell(
         """
         # Section 5 code: chronological split, train-only scaling, and sequence creation.
+        section_5_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec05",
+            section_title="Section 5 - Time-Aware Splitting, Scaling, and 3D Sequence Construction",
+            narrative_markdown=(
+                "We apply chronological train/validation/test splits, fit scalers only on training data, "
+                "and construct synchronized 3D sequences for market and macro branches."
+            ),
+            llm_guidance=(
+                "Use this in Experimental Setup to justify causal splitting and tensor preparation."
+            ),
+        )
+        print(f"Saved narrative: {section_5_narrative_path}")
+
         total_rows = len(aligned_df)
         train_end_index = int(total_rows * config.train_ratio)
         validation_end_index = int(total_rows * (config.train_ratio + config.validation_ratio))
@@ -739,6 +840,19 @@ cells = [
     code_cell(
         """
         # Section 6 code: define a dual-branch, regime-aware neural architecture.
+        section_6_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec06",
+            section_title="Section 6 - Regime-Aware Hybrid Deep Learning Architecture",
+            narrative_markdown=(
+                "The model combines a CNN-LSTM-attention market branch with an LSTM-attention macro branch, "
+                "then applies a macro-conditioned regime gate before multimodal fusion."
+            ),
+            llm_guidance=(
+                "Use this text in the Model section to describe architecture and gating intuition."
+            ),
+        )
+        print(f"Saved narrative: {section_6_narrative_path}")
+
         def temporal_attention_pooling(sequence_tensor, block_name: str):
             attention_scores = layers.Dense(
                 1,
@@ -863,6 +977,19 @@ cells = [
     code_cell(
         """
         # Section 7 code: train the model with robust regularization callbacks.
+        section_7_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec07",
+            section_title="Section 7 - Training Protocol and Regularization",
+            narrative_markdown=(
+                "Training uses MSE objective with early stopping, dropout, and adaptive learning-rate reduction, "
+                "plus deterministic settings and shuffle-disabled temporal batching for reproducibility."
+            ),
+            llm_guidance=(
+                "Use this narrative in Methods to justify regularization and reproducible training protocol."
+            ),
+        )
+        print(f"Saved narrative: {section_7_narrative_path}")
+
         training_callbacks = [
             callbacks.EarlyStopping(
                 monitor="val_loss",
@@ -978,6 +1105,19 @@ cells = [
     code_cell(
         """
         # Section 8 code: compute directional and strategy-based performance metrics.
+        section_8_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec08",
+            section_title="Section 8 - Financially Relevant Evaluation",
+            narrative_markdown=(
+                "Evaluation extends beyond RMSE/MAE by reporting Directional Accuracy and trading utility metrics "
+                "(cumulative return, Sharpe ratio, and maximum drawdown) versus buy-and-hold."
+            ),
+            llm_guidance=(
+                "Use this text in Results to frame why financial utility metrics matter in forecasting studies."
+            ),
+        )
+        print(f"Saved narrative: {section_8_narrative_path}")
+
         def annualized_sharpe_ratio(simple_returns: pd.Series, annualization_factor: int = 252) -> float:
             volatility = simple_returns.std(ddof=0)
             if volatility == 0 or np.isnan(volatility):
@@ -1150,6 +1290,19 @@ cells = [
     code_cell(
         """
         # Section 9 code: export paper-ready artifacts and print manuscript-oriented summaries.
+        section_9_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec09",
+            section_title="Section 9 - Results Packaging and Reproducible Outputs",
+            narrative_markdown=(
+                "This section serializes all quantitative outputs, diagnostics, and narrative snippets "
+                "into structured artifacts for manuscript drafting and reproducibility."
+            ),
+            llm_guidance=(
+                "Use this narrative as transition text from Results to reproducibility assets."
+            ),
+        )
+        print(f"Saved narrative: {section_9_narrative_path}")
+
         save_dataframe_artifact(
             dataframe=data_coverage_table,
             section_tag="sec09",
@@ -1336,6 +1489,19 @@ cells = [
     code_cell(
         """
         # Section 10 code: generate paper-writing assets (captions and limitations statements).
+        section_10_narrative_path = save_narrative_cell_artifact(
+            section_tag="sec10",
+            section_title="Section 10 - Paper Draft Blocks and Figure Captions",
+            narrative_markdown=(
+                "We export figure/table caption libraries, limitations text, and LLM-oriented synthesis instructions "
+                "to accelerate final manuscript assembly in EN-US."
+            ),
+            llm_guidance=(
+                "Use this narrative in the writing workflow section or as editor-facing reproducibility notes."
+            ),
+        )
+        print(f"Saved narrative: {section_10_narrative_path}")
+
         figure_caption_table = pd.DataFrame(
             [
                 {
@@ -1411,12 +1577,13 @@ cells = [
         paper_synthesis_prompt = (
             "Paper assembly guidance for LLMs:\\n"
             "1) Use artifacts in ascending artifact_order from the manifest.\\n"
-            "2) Build the Data section from coverage, missingness, and feature tables.\\n"
-            "3) Build the Methods section from alignment, split, tensor, and model parameter tables.\\n"
-            "4) Build the Results section from main metrics, regime performance, and figures.\\n"
-            "5) Use results_paragraph_draft as a starting point, then cross-check every numeric claim.\\n"
-            "6) Use limitations text unchanged unless new robustness checks are added.\\n"
-            "7) Always reference uncertainty-regime evidence when discussing the contribution."
+            "2) In each section, first consume the corresponding narrative_cell text artifact.\\n"
+            "3) Build the Data section from coverage, missingness, and feature tables.\\n"
+            "4) Build the Methods section from alignment, split, tensor, and model parameter tables.\\n"
+            "5) Build the Results section from main metrics, regime performance, and figures.\\n"
+            "6) Use results_paragraph_draft as a starting point, then cross-check every numeric claim.\\n"
+            "7) Use limitations text unchanged unless new robustness checks are added.\\n"
+            "8) Keep the manuscript language strictly EN-US and always reference uncertainty-regime evidence."
         )
         save_text_artifact(
             text_content=paper_synthesis_prompt,
