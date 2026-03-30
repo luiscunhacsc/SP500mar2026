@@ -70,9 +70,12 @@ cells = [
         # Section 1 code: imports, reproducibility controls, and global settings.
         import os
         import random
+        import json
+        import re
         import sys
         import warnings
         from dataclasses import dataclass
+        from datetime import datetime
         from pathlib import Path
 
         import matplotlib.pyplot as plt
@@ -138,6 +141,133 @@ cells = [
             local_directory.mkdir(parents=True, exist_ok=True)
             print(f"Saving artifacts locally: {local_directory.resolve()}")
             return local_directory
+
+
+        def slugify_label(raw_label: str) -> str:
+            normalized = re.sub(r"[^a-z0-9]+", "_", raw_label.lower())
+            return normalized.strip("_")
+
+
+        ARTIFACT_COUNTER = 1
+        ARTIFACT_MANIFEST = []
+
+
+        def build_artifact_path(section_tag: str, artifact_kind: str, short_name: str, extension: str) -> Path:
+            global ARTIFACT_COUNTER
+            file_name = (
+                f"{ARTIFACT_COUNTER:03d}_"
+                f"{slugify_label(section_tag)}_"
+                f"{slugify_label(artifact_kind)}_"
+                f"{slugify_label(short_name)}."
+                f"{extension}"
+            )
+            ARTIFACT_COUNTER += 1
+            return output_dir / file_name
+
+
+        def register_artifact(
+            artifact_path: Path,
+            section_tag: str,
+            artifact_kind: str,
+            short_name: str,
+            manuscript_role: str,
+            llm_guidance: str,
+        ) -> None:
+            ARTIFACT_MANIFEST.append(
+                {
+                    "artifact_order": len(ARTIFACT_MANIFEST) + 1,
+                    "file_name": artifact_path.name,
+                    "saved_path": str(artifact_path),
+                    "section": section_tag,
+                    "artifact_kind": artifact_kind,
+                    "short_name": short_name,
+                    "manuscript_role": manuscript_role,
+                    "llm_guidance": llm_guidance,
+                    "created_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                }
+            )
+
+
+        def save_dataframe_artifact(
+            dataframe: pd.DataFrame,
+            section_tag: str,
+            short_name: str,
+            manuscript_role: str,
+            llm_guidance: str,
+            include_index: bool = False,
+        ) -> Path:
+            artifact_path = build_artifact_path(section_tag, "table", short_name, "csv")
+            dataframe.to_csv(artifact_path, index=include_index)
+            register_artifact(
+                artifact_path=artifact_path,
+                section_tag=section_tag,
+                artifact_kind="table",
+                short_name=short_name,
+                manuscript_role=manuscript_role,
+                llm_guidance=llm_guidance,
+            )
+            return artifact_path
+
+
+        def save_text_artifact(
+            text_content: str,
+            section_tag: str,
+            short_name: str,
+            manuscript_role: str,
+            llm_guidance: str,
+        ) -> Path:
+            artifact_path = build_artifact_path(section_tag, "text", short_name, "txt")
+            with open(artifact_path, "w", encoding="utf-8") as file_handle:
+                file_handle.write(text_content)
+            register_artifact(
+                artifact_path=artifact_path,
+                section_tag=section_tag,
+                artifact_kind="text",
+                short_name=short_name,
+                manuscript_role=manuscript_role,
+                llm_guidance=llm_guidance,
+            )
+            return artifact_path
+
+
+        def save_figure_artifact(
+            figure_object,
+            section_tag: str,
+            short_name: str,
+            manuscript_role: str,
+            llm_guidance: str,
+        ) -> Path:
+            artifact_path = build_artifact_path(section_tag, "figure", short_name, "png")
+            figure_object.savefig(artifact_path, dpi=300, bbox_inches="tight")
+            register_artifact(
+                artifact_path=artifact_path,
+                section_tag=section_tag,
+                artifact_kind="figure",
+                short_name=short_name,
+                manuscript_role=manuscript_role,
+                llm_guidance=llm_guidance,
+            )
+            return artifact_path
+
+
+        def save_model_artifact(
+            keras_model,
+            section_tag: str,
+            short_name: str,
+            manuscript_role: str,
+            llm_guidance: str,
+        ) -> Path:
+            artifact_path = build_artifact_path(section_tag, "model", short_name, "keras")
+            keras_model.save(artifact_path)
+            register_artifact(
+                artifact_path=artifact_path,
+                section_tag=section_tag,
+                artifact_kind="model",
+                short_name=short_name,
+                manuscript_role=manuscript_role,
+                llm_guidance=llm_guidance,
+            )
+            return artifact_path
 
 
         config = ExperimentConfig()
@@ -265,7 +395,17 @@ cells = [
         axes[1].set_title("Macro Sentiment Proxies from FRED")
         axes[1].set_ylabel("Index values")
         plt.tight_layout()
-        figure.savefig(output_dir / "figure_01_data_overview.png", dpi=300, bbox_inches="tight")
+        figure_data_overview_path = save_figure_artifact(
+            figure_object=figure,
+            section_tag="sec02",
+            short_name="market_macro_data_overview",
+            manuscript_role="Data section figure showing non-stationarity and macro context.",
+            llm_guidance=(
+                "Use this figure to motivate multimodal fusion and to visually support the abstract claim "
+                "that market behavior co-moves with macro sentiment conditions."
+            ),
+        )
+        print(f"Saved figure: {figure_data_overview_path}")
         plt.show()
 
         display(market_raw.head())
@@ -757,7 +897,17 @@ cells = [
         history_frame[["loss", "val_loss"]].plot(ax=axes[0], title="Training and Validation Loss")
         history_frame[["rmse", "val_rmse"]].plot(ax=axes[1], title="Training and Validation RMSE")
         plt.tight_layout()
-        figure.savefig(output_dir / "figure_02_training_curves.png", dpi=300, bbox_inches="tight")
+        figure_training_curves_path = save_figure_artifact(
+            figure_object=figure,
+            section_tag="sec07",
+            short_name="training_validation_curves",
+            manuscript_role="Optimization diagnostics figure for training stability evidence.",
+            llm_guidance=(
+                "Use this figure in the Methods or Appendix section to discuss convergence, "
+                "regularization behavior, and overfitting control."
+            ),
+        )
+        print(f"Saved figure: {figure_training_curves_path}")
         plt.show()
 
         y_pred_test = model.predict([X_market_test, X_macro_test], verbose=0).reshape(-1)
@@ -785,7 +935,7 @@ cells = [
         prediction_diagnostic_df = pd.DataFrame(
             {"realized_log_return": y_true_test, "predicted_log_return": y_pred_test}
         )
-        plt.figure(figsize=(6, 6))
+        prediction_scatter_figure = plt.figure(figsize=(6, 6))
         plt.scatter(
             prediction_diagnostic_df["realized_log_return"],
             prediction_diagnostic_df["predicted_log_return"],
@@ -798,7 +948,16 @@ cells = [
         plt.xlabel("Realized log return")
         plt.ylabel("Predicted log return")
         plt.tight_layout()
-        plt.savefig(output_dir / "figure_04_predicted_vs_realized.png", dpi=300, bbox_inches="tight")
+        figure_prediction_scatter_path = save_figure_artifact(
+            figure_object=prediction_scatter_figure,
+            section_tag="sec07",
+            short_name="predicted_vs_realized_scatter",
+            manuscript_role="Prediction diagnostic figure for forecast quality interpretation.",
+            llm_guidance=(
+                "Use this plot to discuss calibration quality and sign consistency in out-of-sample returns."
+            ),
+        )
+        print(f"Saved figure: {figure_prediction_scatter_path}")
         plt.show()
         """
     ),
@@ -959,14 +1118,24 @@ cells = [
         equity_curve_df["Regime-Aware Strategy"] = (1 + evaluation_df["strategy_simple_return"]).cumprod()
         equity_curve_df["Buy and Hold"] = (1 + evaluation_df["buy_hold_simple_return"]).cumprod()
 
-        plt.figure(figsize=(12, 5))
+        equity_curve_figure = plt.figure(figsize=(12, 5))
         plt.plot(equity_curve_df.index, equity_curve_df["Regime-Aware Strategy"], label="Regime-Aware Strategy")
         plt.plot(equity_curve_df.index, equity_curve_df["Buy and Hold"], label="Buy and Hold", alpha=0.8)
         plt.title("Out-of-Sample Equity Curves")
         plt.ylabel("Growth of $1")
         plt.legend()
         plt.tight_layout()
-        plt.savefig(output_dir / "figure_03_equity_curves.png", dpi=300, bbox_inches="tight")
+        figure_equity_curves_path = save_figure_artifact(
+            figure_object=equity_curve_figure,
+            section_tag="sec08",
+            short_name="strategy_vs_buy_hold_equity_curves",
+            manuscript_role="Main performance figure comparing strategy utility against benchmark.",
+            llm_guidance=(
+                "Use this figure in the Results section to support claims about economic utility "
+                "beyond pure forecasting error metrics."
+            ),
+        )
+        print(f"Saved figure: {figure_equity_curves_path}")
         plt.show()
         """
     ),
@@ -981,20 +1150,117 @@ cells = [
     code_cell(
         """
         # Section 9 code: export paper-ready artifacts and print manuscript-oriented summaries.
-        data_coverage_table.to_csv(output_dir / "table_data_coverage.csv", index=False)
-        missingness_table.to_csv(output_dir / "table_macro_missingness.csv")
-        feature_catalog_table.to_csv(output_dir / "table_feature_catalog.csv", index=False)
-        market_feature_stats.to_csv(output_dir / "table_market_feature_stats.csv")
-        macro_feature_stats.to_csv(output_dir / "table_macro_feature_stats.csv")
-        alignment_quality_table.to_csv(output_dir / "table_alignment_quality.csv", index=False)
-        split_overview_table.to_csv(output_dir / "table_data_splits.csv", index=False)
-        tensor_shape_table.to_csv(output_dir / "table_tensor_shapes.csv", index=False)
-        model_parameter_table.to_csv(output_dir / "table_model_parameters.csv", index=False)
-        training_summary_table.to_csv(output_dir / "table_training_summary.csv", index=False)
-        metrics_table.to_csv(output_dir / "sp500_regime_aware_metrics.csv", index=False)
-        regime_performance_table.to_csv(output_dir / "table_regime_performance.csv", index=False)
-        evaluation_df.to_csv(output_dir / "sp500_regime_aware_test_results.csv")
-        model.save(output_dir / "sp500_regime_aware_model.keras")
+        save_dataframe_artifact(
+            dataframe=data_coverage_table,
+            section_tag="sec09",
+            short_name="data_coverage_table",
+            manuscript_role="Documents temporal coverage of market and macro datasets.",
+            llm_guidance="Cite this table in the Data subsection to define the sample construction.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=missingness_table,
+            section_tag="sec09",
+            short_name="macro_missingness_table",
+            manuscript_role="Missingness diagnostics for macro sentiment proxies.",
+            llm_guidance="Use this table to discuss data quality and imputation assumptions.",
+            include_index=True,
+        )
+        save_dataframe_artifact(
+            dataframe=feature_catalog_table,
+            section_tag="sec09",
+            short_name="feature_catalog_table",
+            manuscript_role="Catalog of engineered multimodal features.",
+            llm_guidance="Use this table to explain market and macro feature families.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=market_feature_stats,
+            section_tag="sec09",
+            short_name="market_feature_statistics",
+            manuscript_role="Descriptive statistics for engineered market features.",
+            llm_guidance="Use for Methods and Appendix descriptive analysis.",
+            include_index=True,
+        )
+        save_dataframe_artifact(
+            dataframe=macro_feature_stats,
+            section_tag="sec09",
+            short_name="macro_feature_statistics",
+            manuscript_role="Descriptive statistics for engineered macro features.",
+            llm_guidance="Use for Methods and Appendix descriptive analysis.",
+            include_index=True,
+        )
+        save_dataframe_artifact(
+            dataframe=alignment_quality_table,
+            section_tag="sec09",
+            short_name="temporal_alignment_quality",
+            manuscript_role="Evidence of strict no-look-ahead alignment design.",
+            llm_guidance="Use this to justify causal alignment protocol and leakage control.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=split_overview_table,
+            section_tag="sec09",
+            short_name="chronological_split_overview",
+            manuscript_role="Experimental split summary for train/validation/test windows.",
+            llm_guidance="Use in Experimental Setup to describe time-aware splitting.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=tensor_shape_table,
+            section_tag="sec09",
+            short_name="sequence_tensor_shapes",
+            manuscript_role="Model input-output tensor dimensionality reference.",
+            llm_guidance="Use in Methods to explain 3D sequence construction.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=model_parameter_table,
+            section_tag="sec09",
+            short_name="model_parameter_counts",
+            manuscript_role="Architecture complexity and parameterization evidence.",
+            llm_guidance="Use to report model size and reproducibility details.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=training_summary_table,
+            section_tag="sec09",
+            short_name="training_summary_table",
+            manuscript_role="Optimization summary with best epoch and losses.",
+            llm_guidance="Use to describe training behavior and convergence.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=metrics_table,
+            section_tag="sec09",
+            short_name="main_performance_metrics",
+            manuscript_role="Primary forecasting and financial utility result table.",
+            llm_guidance="Use as main quantitative results table in the manuscript.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=regime_performance_table,
+            section_tag="sec09",
+            short_name="regime_conditional_performance",
+            manuscript_role="Performance decomposition by macro uncertainty regime.",
+            llm_guidance="Use to support the regime-aware contribution claim.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=evaluation_df,
+            section_tag="sec09",
+            short_name="prediction_level_test_outputs",
+            manuscript_role="Row-level out-of-sample predictions and realized returns.",
+            llm_guidance="Use for appendix robustness checks and auditability.",
+            include_index=True,
+        )
+        save_model_artifact(
+            keras_model=model,
+            section_tag="sec09",
+            short_name="regime_aware_model_checkpoint",
+            manuscript_role="Serialized model checkpoint for reproducibility.",
+            llm_guidance="Use to reproduce inference and perform ablation comparisons.",
+        )
 
         manuscript_results_paragraph = (
             "The proposed regime-aware multimodal model integrates S&P 500 price dynamics with "
@@ -1005,38 +1271,13 @@ cells = [
             f"{strategy_cumulative_return:.2%} versus {buy_hold_cumulative_return:.2%} for buy-and-hold, "
             f"with Sharpe ratios of {strategy_sharpe:.3f} and {buy_hold_sharpe:.3f}, respectively."
         )
-        with open(output_dir / "manuscript_results_paragraph.txt", "w", encoding="utf-8") as file_handle:
-            file_handle.write(manuscript_results_paragraph)
-
-        artifact_usage_rows = [
-            {"Artifact": "table_data_coverage.csv", "Usage": "Data section (sample construction)"},
-            {"Artifact": "table_feature_catalog.csv", "Usage": "Methods section (feature design)"},
-            {"Artifact": "table_data_splits.csv", "Usage": "Methods section (experimental protocol)"},
-            {"Artifact": "table_model_parameters.csv", "Usage": "Model section (architecture size)"},
-            {"Artifact": "table_training_summary.csv", "Usage": "Training section (optimization summary)"},
-            {"Artifact": "sp500_regime_aware_metrics.csv", "Usage": "Main results table"},
-            {"Artifact": "table_regime_performance.csv", "Usage": "Regime-aware robustness analysis"},
-            {"Artifact": "manuscript_results_paragraph.txt", "Usage": "Draft text for Results section"},
-            {"Artifact": "sp500_regime_aware_test_results.csv", "Usage": "Prediction-level appendix"},
-            {"Artifact": "sp500_regime_aware_model.keras", "Usage": "Serialized model checkpoint"},
-        ]
-        paper_asset_index_table = pd.DataFrame(artifact_usage_rows)
-        figure_assets_table = pd.DataFrame(
-            [
-                {"Artifact": "figure_01_data_overview.png", "Usage": "Figure 1 (data overview)"},
-                {"Artifact": "figure_02_training_curves.png", "Usage": "Figure 2 (training diagnostics)"},
-                {"Artifact": "figure_03_equity_curves.png", "Usage": "Figure 3 (equity curves)"},
-                {"Artifact": "figure_04_predicted_vs_realized.png", "Usage": "Figure 4 (prediction diagnostic)"},
-            ]
+        save_text_artifact(
+            text_content=manuscript_results_paragraph,
+            section_tag="sec09",
+            short_name="results_paragraph_draft",
+            manuscript_role="Draft paragraph for the Results section narrative.",
+            llm_guidance="Use directly as prose seed when drafting the main results subsection.",
         )
-        paper_asset_index_table = pd.concat([paper_asset_index_table, figure_assets_table], ignore_index=True)
-        paper_asset_index_table["Saved path"] = paper_asset_index_table["Artifact"].apply(
-            lambda artifact_name: str(output_dir / artifact_name)
-        )
-
-        print("Saved files:")
-        for artifact_path in paper_asset_index_table["Saved path"]:
-            print(f"- {artifact_path}")
 
         summary_series = pd.Series(
             {
@@ -1052,8 +1293,35 @@ cells = [
                 "buy_hold_max_drawdown": buy_hold_max_drawdown,
             }
         )
+        headline_metrics_table = summary_series.to_frame(name="value")
+        save_dataframe_artifact(
+            dataframe=headline_metrics_table,
+            section_tag="sec09",
+            short_name="headline_metric_snapshot",
+            manuscript_role="Compact summary of top-line performance indicators.",
+            llm_guidance="Use as a quick reference block in abstract, conclusion, and response letters.",
+            include_index=True,
+        )
+
+        paper_asset_index_table = pd.DataFrame(ARTIFACT_MANIFEST).sort_values("artifact_order")
+
+        print("Saved files in execution order:")
+        for artifact_path in paper_asset_index_table["saved_path"]:
+            print(f"- {artifact_path}")
+
         display(summary_series.to_frame(name="value"))
-        display(paper_asset_index_table)
+        display(
+            paper_asset_index_table[
+                [
+                    "artifact_order",
+                    "file_name",
+                    "section",
+                    "artifact_kind",
+                    "manuscript_role",
+                    "saved_path",
+                ]
+            ]
+        )
         print("Draft manuscript paragraph:")
         print(manuscript_results_paragraph)
         """
@@ -1116,17 +1384,89 @@ cells = [
             "and (iii) results are based on a single index and should be stress-tested with rolling-origin evaluation."
         )
 
-        figure_caption_table.to_csv(output_dir / "table_figure_captions.csv", index=False)
-        table_caption_table.to_csv(output_dir / "table_table_captions.csv", index=False)
-        with open(output_dir / "manuscript_limitations_block.txt", "w", encoding="utf-8") as file_handle:
-            file_handle.write(limitations_block)
+        save_dataframe_artifact(
+            dataframe=figure_caption_table,
+            section_tag="sec10",
+            short_name="figure_caption_library",
+            manuscript_role="Ready-to-use captions for manuscript figures.",
+            llm_guidance="Use this table when assembling figure legends in the final article.",
+            include_index=False,
+        )
+        save_dataframe_artifact(
+            dataframe=table_caption_table,
+            section_tag="sec10",
+            short_name="table_caption_library",
+            manuscript_role="Ready-to-use captions for manuscript tables.",
+            llm_guidance="Use this table when assembling table legends in the final article.",
+            include_index=False,
+        )
+        save_text_artifact(
+            text_content=limitations_block,
+            section_tag="sec10",
+            short_name="discussion_limitations_block",
+            manuscript_role="Limitations paragraph for Discussion section.",
+            llm_guidance="Use this text as a structured limitations paragraph in the manuscript discussion.",
+        )
 
+        paper_synthesis_prompt = (
+            "Paper assembly guidance for LLMs:\\n"
+            "1) Use artifacts in ascending artifact_order from the manifest.\\n"
+            "2) Build the Data section from coverage, missingness, and feature tables.\\n"
+            "3) Build the Methods section from alignment, split, tensor, and model parameter tables.\\n"
+            "4) Build the Results section from main metrics, regime performance, and figures.\\n"
+            "5) Use results_paragraph_draft as a starting point, then cross-check every numeric claim.\\n"
+            "6) Use limitations text unchanged unless new robustness checks are added.\\n"
+            "7) Always reference uncertainty-regime evidence when discussing the contribution."
+        )
+        save_text_artifact(
+            text_content=paper_synthesis_prompt,
+            section_tag="sec10",
+            short_name="llm_paper_synthesis_prompt",
+            manuscript_role="Instruction block for automated manuscript drafting.",
+            llm_guidance="Use this as system context when asking an LLM to draft the paper.",
+        )
+
+        manifest_table = pd.DataFrame(ARTIFACT_MANIFEST).sort_values("artifact_order").reset_index(drop=True)
+        save_dataframe_artifact(
+            dataframe=manifest_table,
+            section_tag="sec10",
+            short_name="artifact_manifest",
+            manuscript_role="Master index of all generated artifacts in execution order.",
+            llm_guidance="This is the primary routing table for any LLM-based paper construction pipeline.",
+            include_index=False,
+        )
+
+        manifest_json_path = build_artifact_path("sec10", "manifest", "artifact_manifest", "json")
+        with open(manifest_json_path, "w", encoding="utf-8") as file_handle:
+            json.dump(ARTIFACT_MANIFEST, file_handle, indent=2, ensure_ascii=False)
+        register_artifact(
+            artifact_path=manifest_json_path,
+            section_tag="sec10",
+            artifact_kind="manifest",
+            short_name="artifact_manifest",
+            manuscript_role="Machine-readable manifest with rich metadata for all artifacts.",
+            llm_guidance="Use for programmatic ingestion and retrieval-augmented drafting workflows.",
+        )
+
+        final_manifest_table = pd.DataFrame(ARTIFACT_MANIFEST).sort_values("artifact_order").reset_index(drop=True)
         display(figure_caption_table)
         display(table_caption_table)
-        print("Saved additional writing assets:")
-        print(f"- {output_dir / 'table_figure_captions.csv'}")
-        print(f"- {output_dir / 'table_table_captions.csv'}")
-        print(f"- {output_dir / 'manuscript_limitations_block.txt'}")
+        display(
+            final_manifest_table[
+                [
+                    "artifact_order",
+                    "file_name",
+                    "section",
+                    "artifact_kind",
+                    "short_name",
+                    "manuscript_role",
+                    "saved_path",
+                ]
+            ]
+        )
+        print("Saved additional writing and manifest assets in execution order:")
+        for artifact_path in final_manifest_table["saved_path"]:
+            print(f"- {artifact_path}")
         print("Limitations block for Discussion section:")
         print(limitations_block)
         """
