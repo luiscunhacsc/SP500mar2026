@@ -60,9 +60,7 @@ cells = [
         This section fixes the experiment configuration and random seeds to reduce stochastic variance across runs.  
         The forecasting target is the one-day-ahead log return:
 
-        \[
-        r_{t+1} = \log\left(\frac{P_{t+1}}{P_t}\right)
-        \]
+        $$ r_{t+1} = \log\left(\frac{P_{t+1}}{P_t}\right) $$
 
         A deterministic setup improves comparability between model variants and hyperparameter studies.
         """
@@ -193,10 +191,8 @@ cells = [
         For the market channel, we engineer trend, momentum, and risk descriptors (moving-average gaps, RSI, MACD, ATR, and realized volatility).  
         For the macro channel, we derive interpretable transforms:
 
-        \[
-        \pi^{YoY}_t = 100 \times \left(\frac{CPI_t}{CPI_{t-12}} - 1\right), \quad
-        Spread_t = DGS10_t - FEDFUNDS_t
-        \]
+        $$ \pi^{YoY}_t = 100 \times \left(\frac{CPI_t}{CPI_{t-12}} - 1\right), \quad
+        Spread_t = DGS10_t - FEDFUNDS_t $$
 
         This heterogeneous representation is designed to support regime-sensitive forecasting.
         """
@@ -284,9 +280,7 @@ cells = [
         Macroeconomic data arrive at mixed frequencies and are not updated at every market close.  
         We align macro data to the trading calendar via forward fill and then apply a one-business-day lag:
 
-        \[
-        \tilde{m}_t = m_{\max(\tau \le t-1)}
-        \]
+        $$ \tilde{m}_t = m_{\max(\tau \le t-1)} $$
 
         This conservative convention prevents leakage from same-day macro updates that may not have been observable at decision time.
         """
@@ -320,13 +314,11 @@ cells = [
         We use chronological splitting (train, validation, test) to preserve causality.  
         Feature normalization is fit only on the training window and then applied forward in time.
 
-        For sequence length \(L\), each sample is:
+        For sequence length $L$, each sample is:
 
-        \[
-        X_t^{market} \in \mathbb{R}^{L \times d_m}, \quad
+        $$ X_t^{market} \in \mathbb{R}^{L \times d_m}, \quad
         X_t^{macro} \in \mathbb{R}^{L \times d_c}, \quad
-        y_t = r_{t+1}
-        \]
+        y_t = r_{t+1} $$
 
         The output is a pair of synchronized 3D tensors for multimodal learning.
         """
@@ -414,10 +406,8 @@ cells = [
 
         A regime gate is learned from macro context and used to modulate market context before fusion:
 
-        \[
-        g = \sigma(W_g z^{macro} + b_g), \quad
-        \hat{z}^{market} = g \odot z^{market}
-        \]
+        $$ g = \sigma(W_g z^{macro} + b_g), \quad
+        \hat{z}^{market} = g \odot z^{market} $$
 
         The fused representation is mapped to a one-step-ahead return prediction.
         """
@@ -579,11 +569,9 @@ cells = [
 
         Directional Accuracy:
 
-        \[
-        DA = \frac{1}{N}\sum_{t=1}^{N} \mathbf{1}\left[\operatorname{sign}(\hat{r}_{t+1}) = \operatorname{sign}(r_{t+1})\right]
-        \]
+        $$ DA = \frac{1}{N}\sum_{t=1}^{N} \mathbf{1}\left[\operatorname{sign}(\hat{r}_{t+1}) = \operatorname{sign}(r_{t+1})\right] $$
 
-        Trading rule: go long if \(\hat{r}_{t+1} > 0\), otherwise allocate to cash.  
+        Trading rule: go long if $\hat{r}_{t+1} > 0$, otherwise allocate to cash.  
         We report cumulative return, annualized Sharpe ratio, and maximum drawdown, benchmarked against buy-and-hold.
         """
     ),
