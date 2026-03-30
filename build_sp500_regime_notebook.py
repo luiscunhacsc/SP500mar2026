@@ -265,6 +265,7 @@ cells = [
         axes[1].set_title("Macro Sentiment Proxies from FRED")
         axes[1].set_ylabel("Index values")
         plt.tight_layout()
+        figure.savefig(output_dir / "figure_01_data_overview.png", dpi=300, bbox_inches="tight")
         plt.show()
 
         display(market_raw.head())
@@ -756,6 +757,7 @@ cells = [
         history_frame[["loss", "val_loss"]].plot(ax=axes[0], title="Training and Validation Loss")
         history_frame[["rmse", "val_rmse"]].plot(ax=axes[1], title="Training and Validation RMSE")
         plt.tight_layout()
+        figure.savefig(output_dir / "figure_02_training_curves.png", dpi=300, bbox_inches="tight")
         plt.show()
 
         y_pred_test = model.predict([X_market_test, X_macro_test], verbose=0).reshape(-1)
@@ -796,6 +798,7 @@ cells = [
         plt.xlabel("Realized log return")
         plt.ylabel("Predicted log return")
         plt.tight_layout()
+        plt.savefig(output_dir / "figure_04_predicted_vs_realized.png", dpi=300, bbox_inches="tight")
         plt.show()
         """
     ),
@@ -963,6 +966,7 @@ cells = [
         plt.ylabel("Growth of $1")
         plt.legend()
         plt.tight_layout()
+        plt.savefig(output_dir / "figure_03_equity_curves.png", dpi=300, bbox_inches="tight")
         plt.show()
         """
     ),
@@ -1017,6 +1021,15 @@ cells = [
             {"Artifact": "sp500_regime_aware_model.keras", "Usage": "Serialized model checkpoint"},
         ]
         paper_asset_index_table = pd.DataFrame(artifact_usage_rows)
+        figure_assets_table = pd.DataFrame(
+            [
+                {"Artifact": "figure_01_data_overview.png", "Usage": "Figure 1 (data overview)"},
+                {"Artifact": "figure_02_training_curves.png", "Usage": "Figure 2 (training diagnostics)"},
+                {"Artifact": "figure_03_equity_curves.png", "Usage": "Figure 3 (equity curves)"},
+                {"Artifact": "figure_04_predicted_vs_realized.png", "Usage": "Figure 4 (prediction diagnostic)"},
+            ]
+        )
+        paper_asset_index_table = pd.concat([paper_asset_index_table, figure_assets_table], ignore_index=True)
         paper_asset_index_table["Saved path"] = paper_asset_index_table["Artifact"].apply(
             lambda artifact_name: str(output_dir / artifact_name)
         )
