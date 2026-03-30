@@ -70,14 +70,17 @@ cells = [
         # Section 1 code: imports, reproducibility controls, and global settings.
         import os
         import random
+        import sys
         import warnings
         from dataclasses import dataclass
+        from pathlib import Path
 
         import matplotlib.pyplot as plt
         import numpy as np
         import pandas as pd
         import seaborn as sns
         os.environ.setdefault("KERAS_BACKEND", "tensorflow")
+        os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
         import keras
         import yfinance as yf
         from fredapi import Fred
@@ -95,6 +98,16 @@ cells = [
         np.random.seed(SEED)
         keras.utils.set_random_seed(SEED)
 
+        tensorflow_deterministic_ops = "Not enabled"
+        if keras.backend.backend() == "tensorflow":
+            try:
+                import tensorflow as tf
+
+                tf.config.experimental.enable_op_determinism()
+                tensorflow_deterministic_ops = "Enabled"
+            except Exception as deterministic_error:
+                tensorflow_deterministic_ops = f"Unavailable ({deterministic_error})"
+
 
         @dataclass
         class ExperimentConfig:
@@ -105,12 +118,50 @@ cells = [
             train_ratio: float = 0.70
             validation_ratio: float = 0.15
             annualization_factor: int = 252
+            output_subdirectory: str = "sp500_regime_aware_outputs"
+
+
+        def resolve_output_directory(output_subdirectory: str) -> Path:
+            if "google.colab" in sys.modules:
+                try:
+                    from google.colab import drive
+
+                    drive.mount("/content/drive", force_remount=False)
+                    google_drive_directory = Path("/content/drive/MyDrive") / output_subdirectory
+                    google_drive_directory.mkdir(parents=True, exist_ok=True)
+                    print(f"Saving artifacts to Google Drive: {google_drive_directory}")
+                    return google_drive_directory
+                except Exception as drive_error:
+                    print(f"Google Drive mount failed ({drive_error}); using local directory.")
+
+            local_directory = Path(output_subdirectory)
+            local_directory.mkdir(parents=True, exist_ok=True)
+            print(f"Saving artifacts locally: {local_directory.resolve()}")
+            return local_directory
 
 
         config = ExperimentConfig()
+        output_dir = resolve_output_directory(config.output_subdirectory)
         print(config)
         print("Keras backend:", keras.backend.backend())
         print("Keras version:", keras.__version__)
+        print("Output directory:", output_dir)
+
+        reproducibility_table = pd.DataFrame(
+            [
+                {"Item": "Python hash seed", "Value": os.environ["PYTHONHASHSEED"]},
+                {"Item": "Random seed", "Value": SEED},
+                {"Item": "NumPy seed", "Value": SEED},
+                {"Item": "Keras random seed", "Value": SEED},
+                {"Item": "TensorFlow deterministic ops", "Value": tensorflow_deterministic_ops},
+                {"Item": "Market ticker", "Value": config.market_ticker},
+                {"Item": "Sample start date", "Value": config.start_date},
+                {"Item": "Sample end date", "Value": config.end_date},
+                {"Item": "Sequence length", "Value": config.sequence_length},
+                {"Item": "Artifact output directory", "Value": str(output_dir)},
+            ]
+        )
+        display(reproducibility_table)
         """
     ),
     markdown_cell(
@@ -180,6 +231,42 @@ cells = [
         print("Market data shape:", market_raw.shape)
         print("Macro data shape:", macro_raw.shape)
         print("FRED source mode:", data_source_label)
+
+        data_coverage_table = pd.DataFrame(
+            [
+                {
+                    "Dataset": "S&P 500 OHLCV",
+                    "Observations": len(market_raw),
+                    "Start": market_raw.index.min().date(),
+                    "End": market_raw.index.max().date(),
+                },
+                {
+                    "Dataset": "FRED macro-sentiment panel",
+                    "Observations": len(macro_raw),
+                    "Start": macro_raw.index.min().date(),
+                    "End": macro_raw.index.max().date(),
+                },
+            ]
+        )
+        missingness_table = (
+            macro_raw.isna().mean().sort_values(ascending=False).to_frame(name="Missing Share")
+        )
+        display(data_coverage_table)
+        display(missingness_table)
+
+        figure, axes = plt.subplots(2, 1, figsize=(12, 7), sharex=False)
+        market_raw["Adj Close"].plot(ax=axes[0], color="navy", linewidth=1.2)
+        axes[0].set_title("S&P 500 Adjusted Close (Raw Level)")
+        axes[0].set_ylabel("Index level")
+
+        macro_raw[["consumer_sentiment", "macro_news_volatility"]].dropna().plot(
+            ax=axes[1], linewidth=1.1
+        )
+        axes[1].set_title("Macro Sentiment Proxies from FRED")
+        axes[1].set_ylabel("Index values")
+        plt.tight_layout()
+        plt.show()
+
         display(market_raw.head())
         display(macro_raw.head())
         """
@@ -271,6 +358,27 @@ cells = [
 
         print("Number of engineered market features:", len(market_feature_columns))
         print("Number of engineered macro features:", len(macro_feature_columns))
+
+        feature_catalog_table = pd.DataFrame(
+            [
+                {"Feature family": "Market", "Variable": feature_name}
+                for feature_name in market_feature_columns
+            ]
+            + [
+                {"Feature family": "Macro-sentiment", "Variable": feature_name}
+                for feature_name in macro_feature_columns
+            ]
+        )
+        market_feature_stats = market_df[market_feature_columns].describe().T[
+            ["mean", "std", "min", "max"]
+        ]
+        macro_feature_stats = macro_df[macro_feature_columns].describe().T[
+            ["mean", "std", "min", "max"]
+        ]
+
+        display(feature_catalog_table)
+        display(market_feature_stats.round(4))
+        display(macro_feature_stats.round(4))
         """
     ),
     markdown_cell(
@@ -303,6 +411,40 @@ cells = [
         aligned_df.index.name = "date"
 
         print("Aligned dataset shape:", aligned_df.shape)
+
+        lag_validation_table = pd.DataFrame(
+            [
+                {
+                    "Macro feature": feature_name,
+                    "First valid date (no lag)": macro_daily[feature_name].first_valid_index(),
+                    "First valid date (lagged)": macro_daily_lagged[feature_name].first_valid_index(),
+                }
+                for feature_name in macro_feature_columns
+            ]
+        )
+        alignment_quality_table = pd.DataFrame(
+            [
+                {
+                    "Statistic": "Rows after strict alignment",
+                    "Value": len(aligned_df),
+                },
+                {
+                    "Statistic": "Earliest aligned date",
+                    "Value": aligned_df.index.min().date(),
+                },
+                {
+                    "Statistic": "Latest aligned date",
+                    "Value": aligned_df.index.max().date(),
+                },
+                {
+                    "Statistic": "Rows removed by NaN filtering",
+                    "Value": len(market_df) - len(aligned_df),
+                },
+            ]
+        )
+
+        display(alignment_quality_table)
+        display(lag_validation_table)
         display(aligned_df.head())
         display(aligned_df.tail())
         """
@@ -393,6 +535,47 @@ cells = [
         print("Train tensors:", X_market_train.shape, X_macro_train.shape, y_train.shape)
         print("Validation tensors:", X_market_validation.shape, X_macro_validation.shape, y_validation.shape)
         print("Test tensors:", X_market_test.shape, X_macro_test.shape, y_test.shape)
+
+        split_overview_table = pd.DataFrame(
+            [
+                {
+                    "Split": "Train",
+                    "Raw rows": len(train_df),
+                    "Sequence samples": len(y_train),
+                    "Start": train_df.index.min().date(),
+                    "End": train_df.index.max().date(),
+                },
+                {
+                    "Split": "Validation",
+                    "Raw rows": len(validation_df),
+                    "Sequence samples": len(y_validation),
+                    "Start": validation_df.index.min().date(),
+                    "End": validation_df.index.max().date(),
+                },
+                {
+                    "Split": "Test",
+                    "Raw rows": len(test_df),
+                    "Sequence samples": len(y_test),
+                    "Start": test_df.index.min().date(),
+                    "End": test_df.index.max().date(),
+                },
+            ]
+        )
+        tensor_shape_table = pd.DataFrame(
+            [
+                {"Tensor": "X_market_train", "Shape": X_market_train.shape},
+                {"Tensor": "X_macro_train", "Shape": X_macro_train.shape},
+                {"Tensor": "y_train", "Shape": y_train.shape},
+                {"Tensor": "X_market_validation", "Shape": X_market_validation.shape},
+                {"Tensor": "X_macro_validation", "Shape": X_macro_validation.shape},
+                {"Tensor": "y_validation", "Shape": y_validation.shape},
+                {"Tensor": "X_market_test", "Shape": X_market_test.shape},
+                {"Tensor": "X_macro_test", "Shape": X_macro_test.shape},
+                {"Tensor": "y_test", "Shape": y_test.shape},
+            ]
+        )
+        display(split_overview_table)
+        display(tensor_shape_table)
         """
     ),
     markdown_cell(
@@ -496,7 +679,30 @@ cells = [
             macro_feature_count=len(macro_feature_columns),
         )
 
-        model.summary()
+        model_summary_lines = []
+        model.summary(print_fn=model_summary_lines.append)
+        print("\n".join(model_summary_lines))
+
+        model_parameter_table = pd.DataFrame(
+            [
+                {"Statistic": "Total parameters", "Value": model.count_params()},
+                {
+                    "Statistic": "Trainable parameters",
+                    "Value": int(
+                        np.sum([weight.shape.num_elements() for weight in model.trainable_weights])
+                    ),
+                },
+                {
+                    "Statistic": "Non-trainable parameters",
+                    "Value": int(
+                        np.sum([weight.shape.num_elements() for weight in model.non_trainable_weights])
+                    ),
+                },
+                {"Statistic": "Market feature count", "Value": len(market_feature_columns)},
+                {"Statistic": "Macro feature count", "Value": len(macro_feature_columns)},
+            ]
+        )
+        display(model_parameter_table)
         """
     ),
     markdown_cell(
@@ -538,6 +744,7 @@ cells = [
             validation_data=([X_market_validation, X_macro_validation], y_validation),
             epochs=200,
             batch_size=32,
+            shuffle=False,
             callbacks=training_callbacks,
             verbose=1,
         )
@@ -559,6 +766,37 @@ cells = [
 
         print(f"Test RMSE (log-return scale): {test_rmse:.6f}")
         print(f"Test MAE  (log-return scale): {test_mae:.6f}")
+
+        best_epoch = int(history_frame["val_loss"].idxmin()) + 1
+        training_summary_table = pd.DataFrame(
+            [
+                {"Statistic": "Best epoch (by validation loss)", "Value": best_epoch},
+                {"Statistic": "Best validation loss", "Value": float(history_frame["val_loss"].min())},
+                {"Statistic": "Final training loss", "Value": float(history_frame["loss"].iloc[-1])},
+                {"Statistic": "Final validation loss", "Value": float(history_frame["val_loss"].iloc[-1])},
+                {"Statistic": "Test RMSE (log returns)", "Value": test_rmse},
+                {"Statistic": "Test MAE (log returns)", "Value": test_mae},
+            ]
+        )
+        display(training_summary_table)
+
+        prediction_diagnostic_df = pd.DataFrame(
+            {"realized_log_return": y_true_test, "predicted_log_return": y_pred_test}
+        )
+        plt.figure(figsize=(6, 6))
+        plt.scatter(
+            prediction_diagnostic_df["realized_log_return"],
+            prediction_diagnostic_df["predicted_log_return"],
+            alpha=0.25,
+            s=12,
+        )
+        plt.axhline(0, color="black", linewidth=0.8, linestyle="--")
+        plt.axvline(0, color="black", linewidth=0.8, linestyle="--")
+        plt.title("Predicted vs Realized Test Returns")
+        plt.xlabel("Realized log return")
+        plt.ylabel("Predicted log return")
+        plt.tight_layout()
+        plt.show()
         """
     ),
     markdown_cell(
@@ -592,6 +830,19 @@ cells = [
             return float(drawdown_series.min())
 
 
+        def one_sided_binomial_p_value(successes: int, trials: int, null_probability: float = 0.5) -> float:
+            from math import comb
+
+            return float(
+                sum(
+                    comb(trials, k)
+                    * (null_probability ** k)
+                    * ((1 - null_probability) ** (trials - k))
+                    for k in range(successes, trials + 1)
+                )
+            )
+
+
         evaluation_df = pd.DataFrame(
             {
                 "realized_log_return": y_true_test,
@@ -607,12 +858,32 @@ cells = [
             evaluation_df["signal_long_only"] * evaluation_df["realized_simple_return"]
         )
         evaluation_df["buy_hold_simple_return"] = evaluation_df["realized_simple_return"]
+        evaluation_df["macro_news_volatility"] = aligned_df.loc[
+            evaluation_df.index, "macro_news_volatility"
+        ].values
+        macro_regime_codes = pd.qcut(
+            evaluation_df["macro_news_volatility"], q=3, labels=False, duplicates="drop"
+        )
+        regime_label_map = {0: "Low uncertainty", 1: "Medium uncertainty", 2: "High uncertainty"}
+        evaluation_df["macro_uncertainty_regime"] = macro_regime_codes.map(regime_label_map)
 
         directional_accuracy = float(
             (
                 np.sign(evaluation_df["predicted_log_return"])
                 == np.sign(evaluation_df["realized_log_return"])
             ).mean()
+        )
+        directional_successes = int(
+            (
+                np.sign(evaluation_df["predicted_log_return"])
+                == np.sign(evaluation_df["realized_log_return"])
+            ).sum()
+        )
+        directional_trials = int(len(evaluation_df))
+        directional_p_value = one_sided_binomial_p_value(
+            successes=directional_successes,
+            trials=directional_trials,
+            null_probability=0.5,
         )
 
         strategy_cumulative_return = float((1 + evaluation_df["strategy_simple_return"]).prod() - 1.0)
@@ -632,6 +903,11 @@ cells = [
                 {"Metric": "Test MAE (log returns)", "Strategy": test_mae, "Buy and Hold": np.nan},
                 {"Metric": "Directional Accuracy", "Strategy": directional_accuracy, "Buy and Hold": np.nan},
                 {
+                    "Metric": "Directional Accuracy p-value (H0: 50%)",
+                    "Strategy": directional_p_value,
+                    "Buy and Hold": np.nan,
+                },
+                {
                     "Metric": "Cumulative Return",
                     "Strategy": strategy_cumulative_return,
                     "Buy and Hold": buy_hold_cumulative_return,
@@ -649,7 +925,32 @@ cells = [
             ]
         )
 
+        regime_performance_table = (
+            evaluation_df.groupby("macro_uncertainty_regime")
+            .apply(
+                lambda group: pd.Series(
+                    {
+                        "Observations": len(group),
+                        "Directional Accuracy": float(
+                            (
+                                np.sign(group["predicted_log_return"])
+                                == np.sign(group["realized_log_return"])
+                            ).mean()
+                        ),
+                        "Strategy Cumulative Return": float(
+                            (1 + group["strategy_simple_return"]).prod() - 1.0
+                        ),
+                        "Buy-and-Hold Cumulative Return": float(
+                            (1 + group["buy_hold_simple_return"]).prod() - 1.0
+                        ),
+                    }
+                )
+            )
+            .reset_index()
+        )
+
         display(metrics_table)
+        display(regime_performance_table)
 
         equity_curve_df = pd.DataFrame(index=evaluation_df.index)
         equity_curve_df["Regime-Aware Strategy"] = (1 + evaluation_df["strategy_simple_return"]).cumprod()
@@ -675,21 +976,61 @@ cells = [
     ),
     code_cell(
         """
-        # Section 9 code: export artifacts and print concise summary statistics.
-        metrics_table.to_csv("sp500_regime_aware_metrics.csv", index=False)
-        evaluation_df.to_csv("sp500_regime_aware_test_results.csv")
-        model.save("sp500_regime_aware_model.keras")
+        # Section 9 code: export paper-ready artifacts and print manuscript-oriented summaries.
+        data_coverage_table.to_csv(output_dir / "table_data_coverage.csv", index=False)
+        missingness_table.to_csv(output_dir / "table_macro_missingness.csv")
+        feature_catalog_table.to_csv(output_dir / "table_feature_catalog.csv", index=False)
+        market_feature_stats.to_csv(output_dir / "table_market_feature_stats.csv")
+        macro_feature_stats.to_csv(output_dir / "table_macro_feature_stats.csv")
+        alignment_quality_table.to_csv(output_dir / "table_alignment_quality.csv", index=False)
+        split_overview_table.to_csv(output_dir / "table_data_splits.csv", index=False)
+        tensor_shape_table.to_csv(output_dir / "table_tensor_shapes.csv", index=False)
+        model_parameter_table.to_csv(output_dir / "table_model_parameters.csv", index=False)
+        training_summary_table.to_csv(output_dir / "table_training_summary.csv", index=False)
+        metrics_table.to_csv(output_dir / "sp500_regime_aware_metrics.csv", index=False)
+        regime_performance_table.to_csv(output_dir / "table_regime_performance.csv", index=False)
+        evaluation_df.to_csv(output_dir / "sp500_regime_aware_test_results.csv")
+        model.save(output_dir / "sp500_regime_aware_model.keras")
+
+        manuscript_results_paragraph = (
+            "The proposed regime-aware multimodal model integrates S&P 500 price dynamics with "
+            "macro-sentiment proxies from FRED and delivers a test directional accuracy of "
+            f"{directional_accuracy:.2%}. The associated one-sided binomial p-value under a 50% null "
+            f"is {directional_p_value:.4f}, supporting directional skill beyond chance. Under a long-only "
+            "signal rule, the strategy reaches a cumulative return of "
+            f"{strategy_cumulative_return:.2%} versus {buy_hold_cumulative_return:.2%} for buy-and-hold, "
+            f"with Sharpe ratios of {strategy_sharpe:.3f} and {buy_hold_sharpe:.3f}, respectively."
+        )
+        with open(output_dir / "manuscript_results_paragraph.txt", "w", encoding="utf-8") as file_handle:
+            file_handle.write(manuscript_results_paragraph)
+
+        artifact_usage_rows = [
+            {"Artifact": "table_data_coverage.csv", "Usage": "Data section (sample construction)"},
+            {"Artifact": "table_feature_catalog.csv", "Usage": "Methods section (feature design)"},
+            {"Artifact": "table_data_splits.csv", "Usage": "Methods section (experimental protocol)"},
+            {"Artifact": "table_model_parameters.csv", "Usage": "Model section (architecture size)"},
+            {"Artifact": "table_training_summary.csv", "Usage": "Training section (optimization summary)"},
+            {"Artifact": "sp500_regime_aware_metrics.csv", "Usage": "Main results table"},
+            {"Artifact": "table_regime_performance.csv", "Usage": "Regime-aware robustness analysis"},
+            {"Artifact": "manuscript_results_paragraph.txt", "Usage": "Draft text for Results section"},
+            {"Artifact": "sp500_regime_aware_test_results.csv", "Usage": "Prediction-level appendix"},
+            {"Artifact": "sp500_regime_aware_model.keras", "Usage": "Serialized model checkpoint"},
+        ]
+        paper_asset_index_table = pd.DataFrame(artifact_usage_rows)
+        paper_asset_index_table["Saved path"] = paper_asset_index_table["Artifact"].apply(
+            lambda artifact_name: str(output_dir / artifact_name)
+        )
 
         print("Saved files:")
-        print("- sp500_regime_aware_metrics.csv")
-        print("- sp500_regime_aware_test_results.csv")
-        print("- sp500_regime_aware_model.keras")
+        for artifact_path in paper_asset_index_table["Saved path"]:
+            print(f"- {artifact_path}")
 
         summary_series = pd.Series(
             {
                 "test_rmse_log_return": test_rmse,
                 "test_mae_log_return": test_mae,
                 "directional_accuracy": directional_accuracy,
+                "directional_accuracy_p_value": directional_p_value,
                 "strategy_cumulative_return": strategy_cumulative_return,
                 "buy_hold_cumulative_return": buy_hold_cumulative_return,
                 "strategy_sharpe": strategy_sharpe,
@@ -699,6 +1040,82 @@ cells = [
             }
         )
         display(summary_series.to_frame(name="value"))
+        display(paper_asset_index_table)
+        print("Draft manuscript paragraph:")
+        print(manuscript_results_paragraph)
+        """
+    ),
+    markdown_cell(
+        """
+        # Section 10 - Paper Draft Blocks and Figure Captions
+
+        This section produces reusable writing assets for immediate manuscript drafting: figure captions, table captions, and a concise limitations block aligned with the abstract claims.
+        """
+    ),
+    code_cell(
+        """
+        # Section 10 code: generate paper-writing assets (captions and limitations statements).
+        figure_caption_table = pd.DataFrame(
+            [
+                {
+                    "Figure": "Figure 1",
+                    "Caption": "S&P 500 adjusted close and macro-sentiment proxies over the study period, illustrating non-stationarity and macro uncertainty shifts.",
+                },
+                {
+                    "Figure": "Figure 2",
+                    "Caption": "Training and validation trajectories for loss and RMSE, showing optimization stability under early stopping.",
+                },
+                {
+                    "Figure": "Figure 3",
+                    "Caption": "Out-of-sample equity curves comparing the regime-aware strategy against buy-and-hold.",
+                },
+                {
+                    "Figure": "Figure 4",
+                    "Caption": "Predicted versus realized one-day-ahead log returns on the test split.",
+                },
+            ]
+        )
+
+        table_caption_table = pd.DataFrame(
+            [
+                {
+                    "Table": "Table 1",
+                    "Caption": "Sample coverage and missingness diagnostics for market and macro-sentiment data.",
+                },
+                {
+                    "Table": "Table 2",
+                    "Caption": "Feature catalog and summary statistics for engineered market and macro variables.",
+                },
+                {
+                    "Table": "Table 3",
+                    "Caption": "Core predictive and financial performance metrics against buy-and-hold.",
+                },
+                {
+                    "Table": "Table 4",
+                    "Caption": "Regime-conditional performance by macro uncertainty terciles.",
+                },
+            ]
+        )
+
+        limitations_block = (
+            "Limitations: (i) the backtest excludes transaction costs and market impact, "
+            "(ii) macro release calendars are approximated via conservative lagging rather than full real-time vintages, "
+            "and (iii) results are based on a single index and should be stress-tested with rolling-origin evaluation."
+        )
+
+        figure_caption_table.to_csv(output_dir / "table_figure_captions.csv", index=False)
+        table_caption_table.to_csv(output_dir / "table_table_captions.csv", index=False)
+        with open(output_dir / "manuscript_limitations_block.txt", "w", encoding="utf-8") as file_handle:
+            file_handle.write(limitations_block)
+
+        display(figure_caption_table)
+        display(table_caption_table)
+        print("Saved additional writing assets:")
+        print(f"- {output_dir / 'table_figure_captions.csv'}")
+        print(f"- {output_dir / 'table_table_captions.csv'}")
+        print(f"- {output_dir / 'manuscript_limitations_block.txt'}")
+        print("Limitations block for Discussion section:")
+        print(limitations_block)
         """
     ),
 ]
